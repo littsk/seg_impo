@@ -1,3 +1,6 @@
 [submodule "Pytorch-UNet"]
 	path = Pytorch-UNet
 	url = https://github.com/littsk/Pytorch-UNet.git
+[submodule "TransUNet"]
+	path = TransUNet
+	url = https://github.com/littsk/TransUNet.git
