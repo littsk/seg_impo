@@ -4,3 +4,5 @@ data/valid/images/*
 data/valid/masks/*
 env/
 test.ipynb
+*.pyc
+__pycache__/
