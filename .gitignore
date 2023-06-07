@@ -2,3 +2,5 @@ data/train/images/*
 data/train/masks/*
 data/valid/images/*
 data/valid/masks/*
+env/
+test.ipynb
