@@ -6,3 +6,6 @@ env/
 test.ipynb
 *.pyc
 **/__pycache__/
+trans_unet/data/*
+trans_unet/model/*
+.vscode/
