@@ -2,7 +2,7 @@ import torch
 import torchvision
 
 class SimLoss(torch.nn.Module):
-    def __init__(self, num_classes=1, alpha=0.1):
+    def __init__(self, num_classes=1, alpha=0.6):
         """
         args:
             alpha: the weight of the aug_sim_loss
@@ -13,7 +13,7 @@ class SimLoss(torch.nn.Module):
         self.alpha = alpha
         self.pos_val_for_all_neg = 5
         self.neg_val_for_all_pos = -5
-        self.blur = torchvision.transforms.GaussianBlur(kernel_size=7, sigma=3)
+        self.blur = torchvision.transforms.GaussianBlur(kernel_size=9, sigma=3)
         self.sim_criterion = torch.nn.BCEWithLogitsLoss()
         
     def forward(self, input, target):
@@ -21,7 +21,7 @@ class SimLoss(torch.nn.Module):
         try: 
             bs, nc, height, width = input.shape
         except Exception as e:
-            raise ValueError("expect input to have shape (bs, nc, height, width), but received {0}".format(input.shape))
+            raise RuntimeError("expect input to have shape (bs, nc, height, width), but received {0}".format(input.shape))
 
         aug_sim_target = (self.blur(target * 255) > 0).to(torch.int64)
         input, target, aug_sim_target = input.flatten(2), target.flatten(2).float(), aug_sim_target.flatten(2).float()
