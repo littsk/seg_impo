@@ -3,6 +3,7 @@ data/train/masks/*
 data/valid/images/*
 data/valid/masks/*
 env/
+trans_unet_env/
 test.ipynb
 *.pyc
 **/__pycache__/

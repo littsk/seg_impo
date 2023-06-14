@@ -23,21 +23,34 @@ class SimLoss(torch.nn.Module):
         except Exception as e:
             raise RuntimeError("expect input to have shape (bs, nc, height, width), but received {0}".format(input.shape))
 
-        aug_sim_target = (self.blur(target * 255) > 0).to(torch.int64)
-        input, target, aug_sim_target = input.flatten(2), target.flatten(2).float(), aug_sim_target.flatten(2).float()
+        assert target.max() == 1, "target max must be 1, but received {0}".format(target.max())
+        assert target.min() == 0, "target min must be 0, but received {0}".format(target.min())
+        assert torch.numel(torch.unique(target)) == 2, "target should only have 0 and 1, but it had {0}".format(torch.unique(target))
+
+        aug_sim_target_false_pos = (self.blur(target * 255) > 0).to(torch.int64)
+        aug_sim_target_false_neg = (self.blur(-(target -1) * 255) == 0).to(torch.int64)
+
+        
+        input, target = input.flatten(2), target.flatten(2).float()
+        aug_sim_target_false_pos = aug_sim_target_false_pos.flatten(2).float()
+        aug_sim_target_false_neg = aug_sim_target_false_neg.flatten(2).float()
+
         
         # 如果某个feature map全阳的话，则duplicated_false_pos_map为自建值
         # 如果某个feature map全阴的话，则duplicated_pos_map为自建值
         duplicated_pos = self.get_duplicated_pos(input, target)
-        duplicated_false_pos = self.get_duplicated_false_pos(input, aug_sim_target)
+        duplicated_false_pos = self.get_duplicated_false_pos(input, aug_sim_target_false_pos)
+        duplicated_false_neg = self.get_duplicated_false_neg(input, aug_sim_target_false_neg)
 
         sim = duplicated_pos * input
-        aug_sim = duplicated_pos * duplicated_false_pos
+        aug_sim_false_pos = duplicated_pos * duplicated_false_pos
+        aug_sim_false_neg = duplicated_pos * duplicated_false_neg
 
         sim_loss = self.sim_criterion(sim, target) + self.sim_criterion(duplicated_pos, torch.ones_like(input))
-        aug_sim_loss = self.sim_criterion(aug_sim, torch.zeros_like(input))
+        aug_sim_loss_false_pos = self.sim_criterion(aug_sim_false_pos, torch.zeros_like(input))
+        aug_sim_loss_false_neg = self.sim_criterion(aug_sim_false_neg, torch.ones_like(input))
 
-        return sim_loss + self.alpha * aug_sim_loss
+        return sim_loss + self.alpha * aug_sim_loss_false_pos + self.alpha * aug_sim_loss_false_neg
 
 
     def get_duplicated_pos(self, input, target):
@@ -98,3 +111,35 @@ class SimLoss(torch.nn.Module):
 
         duplicated_false_pos = torch.cat(duplicated_false_pos, 0)
         return duplicated_false_pos
+    
+    def get_duplicated_false_neg(self, input, target):
+        duplicated_false_neg = []
+
+        # Loop for duplicated_false_neg calculation
+        for input_sample, target_sample in zip(input, target):
+            duplicated_false_neg_sample = []
+            
+            for input_map, target_map in zip(input_sample, target_sample):
+
+                false_neg_map_idx = torch.logical_and(input_map < 0, target_map > 0)
+                if (target_map > 0).sum() == 0:
+                    # print("all neg")
+                    # 对于全是负例的情况是没有假阴的
+                    false_neg_map = torch.tensor([self.pos_val_for_all_neg]).to(input_map.device)
+                elif false_neg_map_idx.sum() == 0:
+                    # print("not all neg, but not false neg")
+                    # 并非全是负例，但是没有假阴的情况
+                    false_neg_map = input_map[target_map > 0]
+                else:
+                    # 存在假阴的情况
+                    false_neg_map = input_map[false_neg_map_idx]
+                
+                input_over_false_neg_ratio = (input_map.shape[0] + false_neg_map.shape[0] - 1) // false_neg_map.shape[0]
+                duplicated_false_neg_map = torch.tile(false_neg_map, [input_over_false_neg_ratio])[: input_map.shape[0]]
+                duplicated_false_neg_sample.append(duplicated_false_neg_map.unsqueeze(0))
+            
+            duplicated_false_neg_sample = torch.cat(duplicated_false_neg_sample, 0)
+            duplicated_false_neg.append(duplicated_false_neg_sample.unsqueeze(0))
+
+        duplicated_false_neg = torch.cat(duplicated_false_neg, 0)
+        return duplicated_false_neg
