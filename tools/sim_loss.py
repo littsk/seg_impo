@@ -2,7 +2,7 @@ import torch
 import torchvision
 
 class SimLoss(torch.nn.Module):
-    def __init__(self, num_classes=1, alpha=0.6):
+    def __init__(self, num_classes=1, alpha=0.6, beta=0.0):
         """
         args:
             alpha: the weight of the aug_sim_loss
@@ -11,9 +11,10 @@ class SimLoss(torch.nn.Module):
 
         self.num_classes = num_classes
         self.alpha = alpha
+        self.beta = beta
         self.pos_val_for_all_neg = 5
         self.neg_val_for_all_pos = -5
-        self.blur = torchvision.transforms.GaussianBlur(kernel_size=9, sigma=3)
+        self.blur = torchvision.transforms.GaussianBlur(kernel_size=3, sigma=3)
         self.sim_criterion = torch.nn.BCEWithLogitsLoss()
         
     def forward(self, input, target):
@@ -27,30 +28,33 @@ class SimLoss(torch.nn.Module):
         assert target.min() == 0, "target min must be 0, but received {0}".format(target.min())
         assert torch.numel(torch.unique(target)) == 2, "target should only have 0 and 1, but it had {0}".format(torch.unique(target))
 
+        # 初始化两个增强loss
+        aug_sim_loss_false_pos = 0
+        aug_sim_loss_false_neg = 0
         aug_sim_target_false_pos = (self.blur(target * 255) > 0).to(torch.int64)
         aug_sim_target_false_neg = (self.blur(-(target -1) * 255) == 0).to(torch.int64)
 
-        
+        # 计算sim_loss
         input, target = input.flatten(2), target.flatten(2).float()
-        aug_sim_target_false_pos = aug_sim_target_false_pos.flatten(2).float()
-        aug_sim_target_false_neg = aug_sim_target_false_neg.flatten(2).float()
-
-        
-        # 如果某个feature map全阳的话，则duplicated_false_pos_map为自建值
-        # 如果某个feature map全阴的话，则duplicated_pos_map为自建值
         duplicated_pos = self.get_duplicated_pos(input, target)
-        duplicated_false_pos = self.get_duplicated_false_pos(input, aug_sim_target_false_pos)
-        duplicated_false_neg = self.get_duplicated_false_neg(input, aug_sim_target_false_neg)
-
         sim = duplicated_pos * input
-        aug_sim_false_pos = duplicated_pos * duplicated_false_pos
-        aug_sim_false_neg = duplicated_pos * duplicated_false_neg
-
         sim_loss = self.sim_criterion(sim, target) + self.sim_criterion(duplicated_pos, torch.ones_like(input))
-        aug_sim_loss_false_pos = self.sim_criterion(aug_sim_false_pos, torch.zeros_like(input))
-        aug_sim_loss_false_neg = self.sim_criterion(aug_sim_false_neg, torch.ones_like(input))
 
-        return sim_loss + self.alpha * aug_sim_loss_false_pos + self.alpha * aug_sim_loss_false_neg
+        # 如果某个feature map全阳的话，则duplicated_false_pos_map为自建值
+        if self.alpha > 0:
+            aug_sim_target_false_pos = aug_sim_target_false_pos.flatten(2).float()
+            duplicated_false_pos = self.get_duplicated_false_pos(input, aug_sim_target_false_pos)
+            aug_sim_false_pos = duplicated_pos * duplicated_false_pos
+            aug_sim_loss_false_pos = self.sim_criterion(aug_sim_false_pos, torch.zeros_like(input))
+
+        # 如果某个feature map全阴的话，则duplicated_pos_map为自建值
+        if self.beta > 0:
+            aug_sim_target_false_neg = aug_sim_target_false_neg.flatten(2).float()
+            duplicated_false_neg = self.get_duplicated_false_neg(input, aug_sim_target_false_neg)
+            aug_sim_false_neg = duplicated_pos * duplicated_false_neg
+            aug_sim_loss_false_neg = self.sim_criterion(aug_sim_false_neg, torch.ones_like(input))
+
+        return sim_loss + self.alpha * aug_sim_loss_false_pos + self.beta * aug_sim_loss_false_neg
 
 
     def get_duplicated_pos(self, input, target):
